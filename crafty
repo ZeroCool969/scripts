@@ -1,0 +1,115 @@
+#!/usr/bin/bash
+
+# define colors
+pnk='\033[0;35m'
+nc='\033[0m'
+
+echo "###############################################"
+echo -e "${pnk}Updating the system....................${nc}"
+echo "###############################################"
+sudo apt update
+
+echo "###############################################"
+echo -e "${pnk}Upgrading the system....................${nc}"
+echo "###############################################"
+sudo apt upgrade -y
+
+echo "###############################################"
+echo -e "${pnk}Installing required packages for Docker.........${nc}"
+echo "###############################################"
+sudo apt install -y ca-certificates curl
+
+echo "###############################################"
+echo -e "${pnk}Adding Docker GPG key....................${nc}"
+echo "###############################################"
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo "###############################################"
+echo -e "${pnk}Adding Docker Repository....................${nc}"
+echo "###############################################"
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+echo "###############################################"
+echo -e "${pnk}Updating package lists after adding Docker repo...${nc}"
+echo "###############################################"
+sudo apt update
+
+echo "###############################################"
+echo -e "${pnk}Installing Docker Engine & Components........${nc}"
+echo "###############################################"
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+echo "###############################################"
+echo -e "${pnk}Starting Docker Service....................${nc}"
+echo "###############################################"
+sudo systemctl start docker
+
+echo "###############################################"
+echo -e "${pnk}Enabling Docker to start on boot.............${nc}"
+echo "###############################################"
+sudo systemctl enable docker
+
+echo "###############################################"
+echo -e "${pnk}Creating Crafty directory....................${nc}"
+echo "###############################################"
+cd /etc/docker
+sudo mkdir -p crafty
+cd crafty
+
+echo "###############################################"
+echo -e "${pnk}Creating Crafty compose.yml....................${nc}"
+echo "###############################################"
+sudo tee compose.yml <<EOF
+version: '3'
+services:
+  crafty:
+    container_name: crafty_container
+    image: registry.gitlab.com/crafty-controller/crafty-4:latest
+    restart: always
+    environment:
+      - TZ=Etc/UTC
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8123:8123"
+      - "19132:19132/udp"
+      - "25500-25600:25500-25600"
+    volumes:
+      - ./docker/backups:/crafty/backups
+      - ./docker/logs:/crafty/logs
+      - ./docker/servers:/crafty/servers
+      - ./docker/config:/crafty/app/config
+      - ./docker/import:/crafty/import
+EOF
+
+echo "###############################################"
+echo -e "${pnk}Starting Crafty with Docker Compose.............${nc}"
+echo "###############################################"
+sudo docker compose up -d
+
+echo "###############################################"
+echo -e "${pnk}Removing Old Packages....................${nc}"
+echo "###############################################"
+sudo apt autoremove -y
+
+echo "###############################################"
+echo -e "${pnk}Script Has Finished....................${nc}"
+echo "###############################################"
+
+# Final friendly message
+echo -e "${pnk}All done! Crafty should now be running.${nc}"
+echo -e "${pnk}Now go to: http://localhost:8443 to access the web interface.${nc}"
+
+# Show default Crafty credentials from the file
+echo "###############################################"
+echo -e "${pnk}Your default username and password are:${nc}"
+echo "###############################################"
+sudo cat /etc/docker/crafty/config/default-creds.txt
