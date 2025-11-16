@@ -112,4 +112,4 @@ echo -e "${pnk}Now go to: http://localhost:8443 to access the web interface.${nc
 echo "###############################################"
 echo -e "${pnk}Your default username and password are:${nc}"
 echo "###############################################"
-sudo cat /etc/docker/crafty/config/default-creds.txt
+cat /etc/docker/crafty/docker/config/default-creds.txt
