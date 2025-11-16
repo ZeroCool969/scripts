@@ -106,7 +106,7 @@ echo "###############################################"
 
 # Final friendly message
 echo -e "${pnk}All done! Crafty should now be running.${nc}"
-echo -e "${pnk}Now go to: http://localhost:8443 to access the web interface.${nc}"
+echo -e "${pnk}Now go to: https://localhost:8443 to access the web interface.${nc}"
 
 # Show default Crafty credentials from the file
 echo "###############################################"
