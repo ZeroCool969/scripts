@@ -1,115 +1,73 @@
 #!/bin/bash
+set -e
 
-# ==============================================================================
-# ARCH LINUX INSTALLATION SCRIPT (Manual Commands Recreation)
-# ==============================================================================
-
-# 1. USER INPUT & VARIABLES
+# --- 1. USER INPUTS ---
 clear
-echo "--- Arch Installation Configuration ---"
-read -p "Enter Hostname: " MY_HOSTNAME
-read -p "Enter Username: " MY_USER
-read -s -p "Enter Password (Root & User): " MY_PASS
+echo "==> ARCH INSTALLER (VIRT-IO /VDA EDITION)"
+read -p "Hostname: " HOSTNAME
+read -p "Username: " USER
+read -s -p "Password: " PASS
 echo ""
-read -p "Target Drive (e.g. /dev/sda or /dev/nvme0n1): " DRIVE
-read -p "Timezone (e.g. America/New_York): " TIMEZONE
+DISK="/dev/vda" # Hardcoded for your VM
+TZ="UTC"
 
-# Confirm Drive Partitioning
-echo -e "\n!! WARNING: ALL DATA ON $DRIVE WILL BE DELETED !!"
-read -p "Proceed? (y/N): " CONFIRM
-[[ $CONFIRM != "y" ]] && exit
-
-# ==============================================================================
-# 2. PRE-INSTALLATION
-# ==============================================================================
-
-# Set the system clock
+# --- 2. DISK PREPARATION ---
 timedatectl set-ntp true
 
-# Partitioning (GPT)
-# Partition 1: EFI (512M) | Partition 2: Root (Remainder)
-sgdisk --zap-all "$DRIVE"
-sgdisk -n 1:0:+512M -t 1:ef00 "$DRIVE"
-sgdisk -n 2:0:0 -t 2:8304 "$DRIVE"
+# Wipe and create partitions: 512MB EFI (1) and rest for Root (2)
+sgdisk --zap-all "$DISK"
+sgdisk -n 1:0:+512M -t 1:ef00 "$DISK"
+sgdisk -n 2:0:0 -t 2:8304 "$DISK"
 
-# Identify partitions (handling NVMe 'p' suffix)
-if [[ $DRIVE == *"nvme"* ]]; then
-    PART_EFI="${DRIVE}p1"
-    PART_ROOT="${DRIVE}p2"
-else
-    PART_EFI="${DRIVE}1"
-    PART_ROOT="${DRIVE}2"
-fi
+# Define partition paths for vda
+P1="${DISK}1"
+P2="${DISK}2"
 
-# Format partitions
-mkfs.fat -F 32 "$PART_EFI"
-mkfs.ext4 "$PART_ROOT"
+# Format
+mkfs.fat -F 32 "$P1"
+mkfs.ext4 -F "$P2"
 
-# Mount the file systems
-mount "$PART_ROOT" /mnt
-mount --mkdir "$PART_EFI" /mnt/boot
+# Mount
+mount "$P2" /mnt
+mount --mkdir "$P1" /mnt/boot
 
-# ==============================================================================
-# 3. INSTALLATION
-# ==============================================================================
+# --- 3. BASE INSTALL ---
+# Added 'git' and 'vim' just in case you need them later
+pacstrap -K /mnt base linux linux-firmware networkmanager bluez bluez-utils sudo git
 
-# Select mirrors (Reflector is often used in the TUI, but we'll stick to base)
-# Install essential packages
-pacstrap -K /mnt base linux linux-firmware nano vim networkmanager bluez bluez-utils sudo base-devel
-
-# ==============================================================================
-# 4. SYSTEM CONFIGURATION
-# ==============================================================================
-
-# Fstab
+# Generate Fstab
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# Chroot into the new system to run commands
+# --- 4. CHROOT CONFIGURATION ---
 arch-chroot /mnt /bin/bash <<EOF
-
-# Timezone
-ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
+set -e
+ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
 hwclock --systohc
-
-# Localization
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo "$HOSTNAME" > /etc/hostname
 
-# Network configuration
-echo "$MY_HOSTNAME" > /etc/hostname
-
-# Users and Passwords
-echo "root:$MY_PASS" | chpasswd
-useradd -m -G wheel "$MY_USER"
-echo "$MY_USER:$MY_PASS" | chpasswd
+# User/Root Passwords
+echo "root:$PASS" | chpasswd
+useradd -m -G wheel "$USER"
+echo "$USER:$PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
 
-# Initramfs (usually handled by pacstrap, but forced for safety)
-mkinitcpio -P
-
-# Bootloader (Systemd-boot)
+# Systemd-boot Setup
 bootctl install
-PARTUUID=\$(blkid -s PARTUUID -o value $PART_ROOT)
-cat <<EOT > /boot/loader/entries/arch.conf
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=PARTUUID=\$PARTUUID rw
-EOT
+UUID=\$(blkid -s PARTUUID -o value $P2)
 echo "default arch" > /boot/loader/loader.conf
 echo "timeout 3" >> /boot/loader/loader.conf
+echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=\$UUID rw" > /boot/loader/entries/arch.conf
 
-# Enabling Services (Bluetooth and Networking)
+# Enable Services
 systemctl enable NetworkManager
 systemctl enable bluetooth
-
 EOF
 
-# ==============================================================================
-# 5. EXIT
-# ==============================================================================
-
+# --- 5. CLEANUP ---
 umount -R /mnt
-echo "-------------------------------------------------------"
-echo "Done! Unmount the USB and type 'reboot'."
+echo "Installation complete. Eject the ISO and reboot."
+sleep 3
+reboot
