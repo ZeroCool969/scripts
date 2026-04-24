@@ -1,16 +1,16 @@
 #!/bin/bash
 set -e
 
-# --- 1. USER INPUTS ---
+# --- 1. CONFIG ---
 clear
-echo "==> ARCH + KDE + LY (FIXED) + PIPEWIRE"
+echo "==> ARCH INSTALL: KDE + LY (FORCE MODE)"
 read -p "Hostname: " HOSTNAME
 read -p "Username: " USER
 read -s -p "Password: " PASS
 echo ""
-DISK="/dev/vda" 
+DISK="/dev/vda"
 
-# --- 2. DISK PREP ---
+# --- 2. PREP DISK ---
 timedatectl set-ntp true
 sgdisk --zap-all "$DISK"
 sgdisk -n 1:0:+512M -t 1:ef00 "$DISK"
@@ -23,15 +23,18 @@ mkfs.ext4 -F "$P2"
 mount "$P2" /mnt
 mount --mkdir "$P1" /mnt/boot
 
-# --- 3. THE PACKAGE LIST ---
-# Added 'build-essential' logic just in case Ly needs to compile
+# --- 3. REFRESH MIRRORS & PACSTRAP ---
+# This ensures pacstrap actually finds 'ly' and 'plasma'
+pacman -Sy --noconfirm archlinux-keyring
+
+echo "Installing Base + KDE + Ly..."
 pacstrap -K /mnt base linux linux-firmware networkmanager sudo git \
 bluez bluez-utils blueman pipewire pipewire-pulse pipewire-alsa pipewire-jack \
 wireplumber plasma-pa plasma-desktop ly konsole dolphin firefox xdg-user-dirs qemu-guest-agent
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- 4. CHROOT CONFIG ---
+# --- 4. SYSTEM CONFIG ---
 arch-chroot /mnt /bin/bash <<EOF
 set -e
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
@@ -46,7 +49,6 @@ echo "root:$PASS" | chpasswd
 useradd -m -G wheel "$USER"
 echo "$USER:$PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
-sudo -u $USER xdg-user-dirs-update
 
 # Bootloader
 bootctl install
@@ -54,22 +56,23 @@ UUID=\$(blkid -s PARTUUID -o value $P2)
 echo "default arch" > /boot/loader/loader.conf
 echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=\$UUID rw" > /boot/loader/entries/arch.conf
 
-# --- 5. THE LY FIX ---
-# Reloading the manager ensures it 'sees' the newly installed Ly service
-systemctl daemon-reload
+# --- 5. THE SERVICES (THE FIX) ---
+# We run a check to see if Ly actually installed
+if [ -f /usr/lib/systemd/system/ly.service ]; then
+    systemctl enable ly.service
+else
+    echo "ERROR: Ly was not installed correctly. Forcing install inside chroot..."
+    pacman -S --noconfirm ly
+    systemctl enable ly.service
+fi
+
 systemctl enable NetworkManager
 systemctl enable bluetooth
 systemctl enable qemu-guest-agent
-
-echo "Enabling Ly TUI Display Manager..."
-systemctl enable ly || {
-  echo "Standard enable failed, trying manual symlink..."
-  ln -s /usr/lib/systemd/system/ly.service /etc/systemd/system/display-manager.service
-}
 EOF
 
-# --- 6. EXIT ---
+# --- 6. FINISH ---
 umount -R /mnt
-echo "LY + KDE IS READY. REBOOTING..."
+echo "DONE. If you don't see a login box after reboot, something is blocking Ly."
 sleep 2
 reboot
