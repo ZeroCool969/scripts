@@ -1,21 +1,22 @@
 #!/bin/bash
 set -e
 
-# --- 1. CONFIG ---
+# --- 1. PREP & MIRRORS ---
 clear
-echo "==> ARCH INSTALL: KDE + LY (FORCE MODE)"
+echo "==> ARCH INSTALL: KDE + LY (OFFICIAL METHOD)"
 read -p "Hostname: " HOSTNAME
 read -p "Username: " USER
 read -s -p "Password: " PASS
 echo ""
 DISK="/dev/vda"
 
-# --- 2. PREP DISK ---
-timedatectl set-ntp true
+# Refresh keyring and sync database
+pacman -Sy --noconfirm archlinux-keyring
+
+# --- 2. DISK SETUP ---
 sgdisk --zap-all "$DISK"
 sgdisk -n 1:0:+512M -t 1:ef00 "$DISK"
 sgdisk -n 2:0:0 -t 2:8304 "$DISK"
-
 P1="${DISK}1"; P2="${DISK}2"
 
 mkfs.fat -F 32 "$P1"
@@ -23,18 +24,15 @@ mkfs.ext4 -F "$P2"
 mount "$P2" /mnt
 mount --mkdir "$P1" /mnt/boot
 
-# --- 3. REFRESH MIRRORS & PACSTRAP ---
-# This ensures pacstrap actually finds 'ly' and 'plasma'
-pacman -Sy --noconfirm archlinux-keyring
-
-echo "Installing Base + KDE + Ly..."
+# --- 3. PACSTRAP (Including dependencies for Ly) ---
+# Added xorg-xauth (required for Ly to launch X11 sessions like KDE)
 pacstrap -K /mnt base linux linux-firmware networkmanager sudo git \
 bluez bluez-utils blueman pipewire pipewire-pulse pipewire-alsa pipewire-jack \
-wireplumber plasma-pa plasma-desktop ly konsole dolphin firefox xdg-user-dirs qemu-guest-agent
+wireplumber plasma-pa plasma-desktop ly xorg-xauth konsole dolphin firefox xdg-user-dirs
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- 4. SYSTEM CONFIG ---
+# --- 4. CHROOT CONFIG ---
 arch-chroot /mnt /bin/bash <<EOF
 set -e
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
@@ -56,23 +54,22 @@ UUID=\$(blkid -s PARTUUID -o value $P2)
 echo "default arch" > /boot/loader/loader.conf
 echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=\$UUID rw" > /boot/loader/entries/arch.conf
 
-# --- 5. THE SERVICES (THE FIX) ---
-# We run a check to see if Ly actually installed
-if [ -f /usr/lib/systemd/system/ly.service ]; then
-    systemctl enable ly.service
-else
-    echo "ERROR: Ly was not installed correctly. Forcing install inside chroot..."
-    pacman -S --noconfirm ly
-    systemctl enable ly.service
-fi
+# --- 5. PROPER LY ACTIVATION ---
+# 1. Enable the main service
+systemctl enable ly.service
 
+# 2. To ensure Ly takes over the screen on boot:
+# We disable the standard getty on TTY2 and tell Ly to use it
+systemctl disable getty@tty2.service
+systemctl enable ly.service
+
+# Enable other essentials
 systemctl enable NetworkManager
 systemctl enable bluetooth
-systemctl enable qemu-guest-agent
 EOF
 
 # --- 6. FINISH ---
 umount -R /mnt
-echo "DONE. If you don't see a login box after reboot, something is blocking Ly."
+echo "INSTALL COMPLETE. REBOOTING TO LY TUI..."
 sleep 2
 reboot
