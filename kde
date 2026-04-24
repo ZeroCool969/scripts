@@ -1,19 +1,19 @@
 #!/bin/bash
 set -e
 
-# --- 1. PREP & MIRRORS ---
+# --- 1. PREP ---
 clear
-echo "==> ARCH INSTALL: KDE + LY (OFFICIAL METHOD)"
+echo "==> ARCH INSTALL: KDE + LY (VERIFIED)"
 read -p "Hostname: " HOSTNAME
 read -p "Username: " USER
 read -s -p "Password: " PASS
 echo ""
 DISK="/dev/vda"
 
-# Refresh keyring and sync database
+# Sync databases so we find 'ly' in the extra repo
 pacman -Sy --noconfirm archlinux-keyring
 
-# --- 2. DISK SETUP ---
+# --- 2. DISK ---
 sgdisk --zap-all "$DISK"
 sgdisk -n 1:0:+512M -t 1:ef00 "$DISK"
 sgdisk -n 2:0:0 -t 2:8304 "$DISK"
@@ -24,15 +24,16 @@ mkfs.ext4 -F "$P2"
 mount "$P2" /mnt
 mount --mkdir "$P1" /mnt/boot
 
-# --- 3. PACSTRAP (Including dependencies for Ly) ---
-# Added xorg-xauth (required for Ly to launch X11 sessions like KDE)
+# --- 3. THE STACK ---
+# Including every dependency Ly needs to actually launch a desktop
 pacstrap -K /mnt base linux linux-firmware networkmanager sudo git \
 bluez bluez-utils blueman pipewire pipewire-pulse pipewire-alsa pipewire-jack \
-wireplumber plasma-pa plasma-desktop ly xorg-xauth konsole dolphin firefox xdg-user-dirs
+wireplumber plasma-pa plasma-desktop ly xorg-server xorg-xinit xorg-xauth \
+konsole dolphin firefox xdg-user-dirs qemu-guest-agent
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- 4. CHROOT CONFIG ---
+# --- 4. CHROOT ---
 arch-chroot /mnt /bin/bash <<EOF
 set -e
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
@@ -42,7 +43,7 @@ locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "$HOSTNAME" > /etc/hostname
 
-# User Setup
+# Users
 echo "root:$PASS" | chpasswd
 useradd -m -G wheel "$USER"
 echo "$USER:$PASS" | chpasswd
@@ -54,22 +55,21 @@ UUID=\$(blkid -s PARTUUID -o value $P2)
 echo "default arch" > /boot/loader/loader.conf
 echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=\$UUID rw" > /boot/loader/entries/arch.conf
 
-# --- 5. PROPER LY ACTIVATION ---
-# 1. Enable the main service
+# --- 5. ENABLING LY PROPERLY ---
+# Disable the getty that usually hogs the screen
+systemctl disable getty@tty1.service || true
+# Force the display-manager symlink and enable the service
+ln -sf /usr/lib/systemd/system/ly.service /etc/systemd/system/display-manager.service
 systemctl enable ly.service
 
-# 2. To ensure Ly takes over the screen on boot:
-# We disable the standard getty on TTY2 and tell Ly to use it
-systemctl disable getty@tty2.service
-systemctl enable ly.service
-
-# Enable other essentials
+# Core Services
 systemctl enable NetworkManager
 systemctl enable bluetooth
+systemctl enable qemu-guest-agent
 EOF
 
-# --- 6. FINISH ---
+# --- 6. EXIT ---
 umount -R /mnt
-echo "INSTALL COMPLETE. REBOOTING TO LY TUI..."
+echo "SUCCESS. REBOOTING TO LY TUI."
 sleep 2
 reboot
